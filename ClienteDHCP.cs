@@ -29,7 +29,7 @@ namespace SimuladorRedes
 
         public void IniciarMedicionTrafico(int traficoInicial = 10)
         {
-            if (!MedicionActiva)
+            if (!MedicionActiva && Activo)
             {
                 MedicionActiva = true;
                 Trafico = traficoInicial;
@@ -63,8 +63,26 @@ namespace SimuladorRedes
         public void ActualizarActividad()
         {
             UltimaActividad = DateTime.Now;
+        }
+
+        // Nuevo método para activar manualmente
+        public void Activar()
+        {
             if (!Activo)
+            {
                 Activo = true;
+                UltimaActividad = DateTime.Now;
+            }
+        }
+
+        // Nuevo método para desactivar manualmente
+        public void Desactivar()
+        {
+            if (Activo)
+            {
+                Activo = false;
+                DetenerMedicionTrafico();
+            }
         }
     }
 }

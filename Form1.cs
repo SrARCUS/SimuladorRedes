@@ -32,6 +32,10 @@ namespace SimuladorRedes
         private Button btnPrevenirIP;
         private Label lblMascara;
 
+        // Nuevos botones para activar/desactivar
+        private Button btnActivarCliente;
+        private Button btnDesactivarCliente;
+
         public Form1()
         {
             InitializeComponent();
@@ -76,7 +80,7 @@ namespace SimuladorRedes
 
         private void InicializarControles()
         {
-            this.Size = new Size(900, 600);
+            this.Size = new Size(900, 650); // Aumentamos la altura para los nuevos botones
             this.Text = "Simulador de Redes - DHCP";
 
             // ListBox de clientes
@@ -92,7 +96,7 @@ namespace SimuladorRedes
             panelInfoCliente = new Panel
             {
                 Location = new Point(270, 40),
-                Size = new Size(600, 400),
+                Size = new Size(600, 500), // Aumentamos altura
                 BorderStyle = BorderStyle.FixedSingle
             };
 
@@ -212,8 +216,31 @@ namespace SimuladorRedes
             btnPrevenirIP.Click += BtnPrevenirIP_Click;
             panelInfoCliente.Controls.Add(btnPrevenirIP);
 
-            // Mostrar máscara de red calculada (AHORA SÍ dhcpManager ya está inicializado)
+            // NUEVOS BOTONES PARA ACTIVAR/DESACTIVAR
             yPos += spacing;
+
+            btnActivarCliente = new Button
+            {
+                Text = "Activar Cliente",
+                Location = new Point(10, yPos),
+                Size = new Size(120, 30),
+                BackColor = Color.LightGreen
+            };
+            btnActivarCliente.Click += BtnActivarCliente_Click;
+            panelInfoCliente.Controls.Add(btnActivarCliente);
+
+            btnDesactivarCliente = new Button
+            {
+                Text = "Desactivar Cliente",
+                Location = new Point(140, yPos),
+                Size = new Size(120, 30),
+                BackColor = Color.LightCoral
+            };
+            btnDesactivarCliente.Click += BtnDesactivarCliente_Click;
+            panelInfoCliente.Controls.Add(btnDesactivarCliente);
+
+            // Mostrar máscara de red calculada
+            yPos += spacing + 10;
             lblMascara = new Label
             {
                 Text = $"Máscara de red: {dhcpManager.MascaraRed}",
@@ -255,12 +282,18 @@ namespace SimuladorRedes
             txtHostname.Text = cliente.Hostname;
             chkActivo.Checked = cliente.Activo;
 
+            // Actualizar estado de botones según si el cliente está activo
+            btnActivarCliente.Enabled = !cliente.Activo;
+            btnDesactivarCliente.Enabled = cliente.Activo;
+
             // Actualizar controles de tráfico
             trackTrafico.Value = cliente.Trafico;
             lblTrafico.Text = $"{cliente.Trafico} Mbps";
 
             btnIniciarTrafico.Enabled = cliente.Activo && !cliente.MedicionActiva;
             btnDetenerTrafico.Enabled = cliente.MedicionActiva;
+            btnReservarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
+            btnPrevenirIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
 
             // Actualizar máscara de red (por si cambió)
             lblMascara.Text = $"Máscara de red: {dhcpManager.MascaraRed}";
@@ -316,6 +349,30 @@ namespace SimuladorRedes
             }
         }
 
+        // NUEVO: Método para activar cliente manualmente
+        private void BtnActivarCliente_Click(object sender, EventArgs e)
+        {
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
+            {
+                cliente.Activar();
+                MostrarInformacionCliente(cliente);
+                ActualizarListBoxClientes();
+                MessageBox.Show($"Cliente {cliente.Hostname} activado manualmente", "Cliente Activado");
+            }
+        }
+
+        // NUEVO: Método para desactivar cliente manualmente
+        private void BtnDesactivarCliente_Click(object sender, EventArgs e)
+        {
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
+            {
+                cliente.Desactivar();
+                MostrarInformacionCliente(cliente);
+                ActualizarListBoxClientes();
+                MessageBox.Show($"Cliente {cliente.Hostname} desactivado manualmente", "Cliente Desactivado");
+            }
+        }
+
         private void OnClienteDesactivado(ClienteDHCP cliente)
         {
             if (this.InvokeRequired)
@@ -326,9 +383,7 @@ namespace SimuladorRedes
 
             if (listBoxClientes.SelectedItem == cliente)
             {
-                chkActivo.Checked = false;
-                btnIniciarTrafico.Enabled = false;
-                btnDetenerTrafico.Enabled = false;
+                MostrarInformacionCliente(cliente);
             }
 
             // Actualizar el ListBox para reflejar el cambio
