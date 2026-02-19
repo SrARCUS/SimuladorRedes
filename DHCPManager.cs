@@ -147,7 +147,8 @@ namespace SimuladorRedes
 
         public void AgregarClienteEjemplo(int numero)
         {
-            string mac = $"00:1A:2B:3C:4D:{numero:D2}";
+            // Generar MAC única basada en el número y timestamp para evitar duplicados
+            string mac = $"00:1A:2B:3C:{DateTime.Now.Second:D2}:{numero:D2}";
             string hostname = $"Cliente-{numero}";
 
             var cliente = new ClienteDHCP(mac, hostname);

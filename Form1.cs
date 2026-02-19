@@ -32,9 +32,13 @@ namespace SimuladorRedes
         private Button btnPrevenirIP;
         private Label lblMascara;
 
-        // Nuevos botones para activar/desactivar
+        // Botones para activar/desactivar
         private Button btnActivarCliente;
         private Button btnDesactivarCliente;
+
+        // NUEVO: Botón para agregar cliente
+        private Button btnAgregarCliente;
+        private Label lblTotalClientes;
 
         public Form1()
         {
@@ -53,6 +57,7 @@ namespace SimuladorRedes
             dhcpManager.AgregarClienteEjemplo(2);
 
             ActualizarListBoxClientes();
+            ActualizarTotalClientes();
         }
 
         private void InicializarMenu()
@@ -80,13 +85,43 @@ namespace SimuladorRedes
 
         private void InicializarControles()
         {
-            this.Size = new Size(900, 650); // Aumentamos la altura para los nuevos botones
+            this.Size = new Size(900, 700); // Aumentamos la altura
             this.Text = "Simulador de Redes - DHCP";
+
+            // Panel superior para controles adicionales
+            Panel panelSuperior = new Panel
+            {
+                Location = new Point(12, 40),
+                Size = new Size(850, 50),
+                BorderStyle = BorderStyle.None
+            };
+
+            // NUEVO: Botón para agregar cliente
+            btnAgregarCliente = new Button
+            {
+                Text = "➕ Agregar Nuevo Cliente",
+                Location = new Point(0, 10),
+                Size = new Size(180, 30),
+                BackColor = Color.LightBlue,
+                FlatStyle = FlatStyle.Flat
+            };
+            btnAgregarCliente.Click += BtnAgregarCliente_Click;
+
+            // NUEVO: Label para mostrar total de clientes
+            lblTotalClientes = new Label
+            {
+                Text = "Total clientes: 2",
+                Location = new Point(200, 15),
+                Size = new Size(150, 25),
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+
+            panelSuperior.Controls.AddRange(new Control[] { btnAgregarCliente, lblTotalClientes });
 
             // ListBox de clientes
             listBoxClientes = new ListBox
             {
-                Location = new Point(12, 40),
+                Location = new Point(12, 100),
                 Size = new Size(250, 400),
                 DisplayMember = "Hostname"
             };
@@ -95,8 +130,8 @@ namespace SimuladorRedes
             // Panel de información del cliente
             panelInfoCliente = new Panel
             {
-                Location = new Point(270, 40),
-                Size = new Size(600, 500), // Aumentamos altura
+                Location = new Point(270, 100),
+                Size = new Size(600, 500),
                 BorderStyle = BorderStyle.FixedSingle
             };
 
@@ -216,7 +251,7 @@ namespace SimuladorRedes
             btnPrevenirIP.Click += BtnPrevenirIP_Click;
             panelInfoCliente.Controls.Add(btnPrevenirIP);
 
-            // NUEVOS BOTONES PARA ACTIVAR/DESACTIVAR
+            // Botones para activar/desactivar
             yPos += spacing;
 
             btnActivarCliente = new Button
@@ -250,6 +285,7 @@ namespace SimuladorRedes
             };
             panelInfoCliente.Controls.Add(lblMascara);
 
+            this.Controls.Add(panelSuperior);
             this.Controls.Add(listBoxClientes);
             this.Controls.Add(panelInfoCliente);
         }
@@ -265,6 +301,12 @@ namespace SimuladorRedes
         {
             listBoxClientes.DataSource = null;
             listBoxClientes.DataSource = dhcpManager.Clientes;
+        }
+
+        // NUEVO: Método para actualizar el contador de clientes
+        private void ActualizarTotalClientes()
+        {
+            lblTotalClientes.Text = $"Total clientes: {dhcpManager.Clientes.Count}";
         }
 
         private void ListBoxClientes_SelectedIndexChanged(object sender, EventArgs e)
@@ -297,6 +339,43 @@ namespace SimuladorRedes
 
             // Actualizar máscara de red (por si cambió)
             lblMascara.Text = $"Máscara de red: {dhcpManager.MascaraRed}";
+        }
+
+        // NUEVO: Método para agregar nuevo cliente
+        private void BtnAgregarCliente_Click(object sender, EventArgs e)
+        {
+            // Encontrar el próximo número disponible para el cliente
+            int nextNumber = 1;
+            var existingNumbers = dhcpManager.Clientes
+                .Select(c => int.Parse(c.Hostname.Replace("Cliente-", "")))
+                .OrderBy(n => n)
+                .ToList();
+
+            // Buscar el primer número no utilizado
+            foreach (int num in existingNumbers)
+            {
+                if (num == nextNumber)
+                    nextNumber++;
+                else
+                    break;
+            }
+
+            // Agregar el nuevo cliente
+            dhcpManager.AgregarClienteEjemplo(nextNumber);
+
+            // Actualizar la interfaz
+            ActualizarListBoxClientes();
+            ActualizarTotalClientes();
+
+            // Seleccionar el nuevo cliente automáticamente
+            var nuevoCliente = dhcpManager.Clientes.FirstOrDefault(c => c.Hostname == $"Cliente-{nextNumber}");
+            if (nuevoCliente != null)
+            {
+                listBoxClientes.SelectedItem = nuevoCliente;
+            }
+
+            MessageBox.Show($"Nuevo cliente Cliente-{nextNumber} agregado exitosamente.\nMAC: {nuevoCliente.MacAddress}\nIP: {nuevoCliente.IP}",
+                "Cliente Agregado", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void TrackTrafico_Scroll(object sender, EventArgs e)
@@ -349,7 +428,6 @@ namespace SimuladorRedes
             }
         }
 
-        // NUEVO: Método para activar cliente manualmente
         private void BtnActivarCliente_Click(object sender, EventArgs e)
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
@@ -361,7 +439,6 @@ namespace SimuladorRedes
             }
         }
 
-        // NUEVO: Método para desactivar cliente manualmente
         private void BtnDesactivarCliente_Click(object sender, EventArgs e)
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
