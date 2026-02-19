@@ -166,5 +166,31 @@ namespace SimuladorRedes
                 cliente.DetenerMedicionTrafico();
             }
         }
+        public void CambiarRedBase(string nuevaRed)
+        {
+            RedBase = nuevaRed;
+            IPsOcupadas.Clear();
+
+            // Reasignar IPs a todos los clientes basado en la nueva red
+            foreach (var cliente in Clientes)
+            {
+                if (cliente.TieneReserva && !string.IsNullOrEmpty(cliente.IP))
+                {
+                    // Mantener la reserva si la IP está en el nuevo rango
+                    if (cliente.IP.StartsWith(RedBase))
+                    {
+                        IPsOcupadas.Add(cliente.IP);
+                    }
+                    else
+                    {
+                        cliente.IP = AsignarIP(cliente);
+                    }
+                }
+                else
+                {
+                    cliente.IP = AsignarIP(cliente);
+                }
+            }
+        }
     }
 }

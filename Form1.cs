@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Drawing;
 using System.Linq;
+using System.Net;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace SimuladorRedes
@@ -30,15 +32,25 @@ namespace SimuladorRedes
         private Button btnReservarIP;
         private NumericUpDown nudTiempoInactividad;
         private Button btnPrevenirIP;
-        private Label lblMascara;
+        private Label lblMascara; // Única etiqueta para la máscara
 
         // Botones para activar/desactivar
         private Button btnActivarCliente;
         private Button btnDesactivarCliente;
 
-        // NUEVO: Botón para agregar cliente
+        // Botón para agregar cliente
         private Button btnAgregarCliente;
         private Label lblTotalClientes;
+
+        // Controles para editar IP manualmente
+        private Button btnEditarIP;
+        private Button btnGuardarIP;
+        private Button btnCancelarEdicion;
+        private ComboBox cmbRedBase;
+        private NumericUpDown nudOcteto4;
+        private Label lblInfoRed;
+        private bool modoEdicionIP = false;
+        private string ipOriginalEnEdicion;
 
         public Form1()
         {
@@ -85,18 +97,18 @@ namespace SimuladorRedes
 
         private void InicializarControles()
         {
-            this.Size = new Size(900, 700); // Aumentamos la altura
+            this.Size = new Size(950, 700);
             this.Text = "Simulador de Redes - DHCP";
 
             // Panel superior para controles adicionales
             Panel panelSuperior = new Panel
             {
                 Location = new Point(12, 40),
-                Size = new Size(850, 50),
+                Size = new Size(900, 80),
                 BorderStyle = BorderStyle.None
             };
 
-            // NUEVO: Botón para agregar cliente
+            // Botón para agregar cliente
             btnAgregarCliente = new Button
             {
                 Text = "➕ Agregar Nuevo Cliente",
@@ -107,7 +119,7 @@ namespace SimuladorRedes
             };
             btnAgregarCliente.Click += BtnAgregarCliente_Click;
 
-            // NUEVO: Label para mostrar total de clientes
+            // Label para mostrar total de clientes
             lblTotalClientes = new Label
             {
                 Text = "Total clientes: 2",
@@ -116,13 +128,47 @@ namespace SimuladorRedes
                 Font = new Font("Arial", 10, FontStyle.Bold)
             };
 
-            panelSuperior.Controls.AddRange(new Control[] { btnAgregarCliente, lblTotalClientes });
+            // Control para cambiar la red base
+            Label lblRedBase = new Label
+            {
+                Text = "Red Base:",
+                Location = new Point(350, 15),
+                Size = new Size(70, 25)
+            };
+
+            cmbRedBase = new ComboBox
+            {
+                Location = new Point(420, 12),
+                Size = new Size(120, 25),
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cmbRedBase.Items.AddRange(new string[] { "192.168.1", "192.168.0", "10.0.0", "172.16.0" });
+            cmbRedBase.SelectedItem = "192.168.1";
+            cmbRedBase.SelectedIndexChanged += CmbRedBase_SelectedIndexChanged;
+
+            // Label para información de red
+            lblInfoRed = new Label
+            {
+                Text = $"Máscara actual: {dhcpManager.MascaraRed}",
+                Location = new Point(550, 15),
+                Size = new Size(300, 25),
+                Font = new Font("Arial", 9, FontStyle.Regular)
+            };
+
+            panelSuperior.Controls.AddRange(new Control[]
+            {
+                btnAgregarCliente,
+                lblTotalClientes,
+                lblRedBase,
+                cmbRedBase,
+                lblInfoRed
+            });
 
             // ListBox de clientes
             listBoxClientes = new ListBox
             {
-                Location = new Point(12, 100),
-                Size = new Size(250, 400),
+                Location = new Point(12, 130),
+                Size = new Size(250, 450),
                 DisplayMember = "Hostname"
             };
             listBoxClientes.SelectedIndexChanged += ListBoxClientes_SelectedIndexChanged;
@@ -130,8 +176,8 @@ namespace SimuladorRedes
             // Panel de información del cliente
             panelInfoCliente = new Panel
             {
-                Location = new Point(270, 100),
-                Size = new Size(600, 500),
+                Location = new Point(270, 130),
+                Size = new Size(650, 500),
                 BorderStyle = BorderStyle.FixedSingle
             };
 
@@ -144,11 +190,55 @@ namespace SimuladorRedes
             txtMac = new TextBox { Location = new Point(100, yPos), Size = new Size(200, 25), ReadOnly = true };
             panelInfoCliente.Controls.AddRange(new Control[] { lblMac, txtMac });
 
-            // IP
+            // IP - Con edición
             yPos += spacing;
             Label lblIP = new Label { Text = "IP:", Location = new Point(10, yPos), Size = new Size(80, 25) };
-            txtIP = new TextBox { Location = new Point(100, yPos), Size = new Size(200, 25), ReadOnly = true };
-            panelInfoCliente.Controls.AddRange(new Control[] { lblIP, txtIP });
+            txtIP = new TextBox { Location = new Point(100, yPos), Size = new Size(150, 25), ReadOnly = true };
+
+            // Botones para editar IP
+            btnEditarIP = new Button
+            {
+                Text = "✏️ Editar IP",
+                Location = new Point(260, yPos),
+                Size = new Size(90, 25),
+                BackColor = Color.LightYellow
+            };
+            btnEditarIP.Click += BtnEditarIP_Click;
+
+            btnGuardarIP = new Button
+            {
+                Text = "💾 Guardar",
+                Location = new Point(360, yPos),
+                Size = new Size(80, 25),
+                BackColor = Color.LightGreen,
+                Visible = false
+            };
+            btnGuardarIP.Click += BtnGuardarIP_Click;
+
+            btnCancelarEdicion = new Button
+            {
+                Text = "❌ Cancelar",
+                Location = new Point(450, yPos),
+                Size = new Size(80, 25),
+                BackColor = Color.LightCoral,
+                Visible = false
+            };
+            btnCancelarEdicion.Click += BtnCancelarEdicion_Click;
+
+            // Control para editar el último octeto
+            nudOcteto4 = new NumericUpDown
+            {
+                Location = new Point(100, yPos),
+                Size = new Size(60, 25),
+                Minimum = 2,
+                Maximum = 254,
+                Visible = false
+            };
+
+            panelInfoCliente.Controls.AddRange(new Control[]
+            {
+                lblIP, txtIP, btnEditarIP, btnGuardarIP, btnCancelarEdicion, nudOcteto4
+            });
 
             // Hostname
             yPos += spacing;
@@ -274,14 +364,15 @@ namespace SimuladorRedes
             btnDesactivarCliente.Click += BtnDesactivarCliente_Click;
             panelInfoCliente.Controls.Add(btnDesactivarCliente);
 
-            // Mostrar máscara de red calculada
+            // Mostrar máscara de red calculada (ÚNICA etiqueta)
             yPos += spacing + 10;
             lblMascara = new Label
             {
-                Text = $"Máscara de red: {dhcpManager.MascaraRed}",
+                Text = $"Máscara de red: {CalcularMascaraPorIP("192.168.1.1")}",
                 Location = new Point(10, yPos),
-                Size = new Size(250, 25),
-                Font = new Font("Arial", 10, FontStyle.Bold)
+                Size = new Size(400, 30),
+                Font = new Font("Arial", 11, FontStyle.Bold),
+                ForeColor = Color.Black
             };
             panelInfoCliente.Controls.Add(lblMascara);
 
@@ -303,7 +394,6 @@ namespace SimuladorRedes
             listBoxClientes.DataSource = dhcpManager.Clientes;
         }
 
-        // NUEVO: Método para actualizar el contador de clientes
         private void ActualizarTotalClientes()
         {
             lblTotalClientes.Text = $"Total clientes: {dhcpManager.Clientes.Count}";
@@ -313,6 +403,11 @@ namespace SimuladorRedes
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
             {
+                // Salir del modo edición si estábamos en él
+                if (modoEdicionIP)
+                {
+                    CancelarEdicionIP();
+                }
                 MostrarInformacionCliente(cliente);
             }
         }
@@ -324,9 +419,20 @@ namespace SimuladorRedes
             txtHostname.Text = cliente.Hostname;
             chkActivo.Checked = cliente.Activo;
 
+            // Actualizar la máscara de red según la IP del cliente seleccionado
+            if (!string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
+            {
+                lblMascara.Text = $"Máscara de red: {CalcularMascaraPorIP(cliente.IP)}";
+            }
+            else
+            {
+                lblMascara.Text = $"Máscara de red: {CalcularMascaraPorIP(dhcpManager.RedBase + ".1")}";
+            }
+
             // Actualizar estado de botones según si el cliente está activo
             btnActivarCliente.Enabled = !cliente.Activo;
             btnDesactivarCliente.Enabled = cliente.Activo;
+            btnEditarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
 
             // Actualizar controles de tráfico
             trackTrafico.Value = cliente.Trafico;
@@ -336,12 +442,158 @@ namespace SimuladorRedes
             btnDetenerTrafico.Enabled = cliente.MedicionActiva;
             btnReservarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
             btnPrevenirIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
-
-            // Actualizar máscara de red (por si cambió)
-            lblMascara.Text = $"Máscara de red: {dhcpManager.MascaraRed}";
         }
 
-        // NUEVO: Método para agregar nuevo cliente
+        // Método para calcular máscara basada en IP (simplificado)
+        private string CalcularMascaraPorIP(string ip)
+        {
+            try
+            {
+                if (IPAddress.TryParse(ip, out IPAddress ipAddr))
+                {
+                    byte[] bytes = ipAddr.GetAddressBytes();
+                    int primerOcteto = bytes[0];
+
+                    if (primerOcteto >= 1 && primerOcteto <= 126)
+                        return "255.0.0.0 (Clase A)";
+                    else if (primerOcteto >= 128 && primerOcteto <= 191)
+                        return "255.255.0.0 (Clase B)";
+                    else if (primerOcteto >= 192 && primerOcteto <= 223)
+                        return "255.255.255.0 (Clase C)";
+                    else
+                        return "255.255.255.0 (Estándar)";
+                }
+            }
+            catch
+            {
+                // Ignorar errores
+            }
+            return "255.255.255.0 (Estándar)";
+        }
+
+        // Cambiar red base
+        private void CmbRedBase_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string nuevaRed = cmbRedBase.SelectedItem.ToString();
+            dhcpManager.CambiarRedBase(nuevaRed);
+            lblInfoRed.Text = $"Red base: {nuevaRed}";
+
+            // Reasignar IPs a todos los clientes
+            foreach (var cliente in dhcpManager.Clientes)
+            {
+                string ipAnterior = cliente.IP;
+                cliente.IP = dhcpManager.AsignarIP(cliente);
+            }
+
+            ActualizarListBoxClientes();
+
+            // Actualizar la máscara si hay un cliente seleccionado
+            if (listBoxClientes.SelectedItem is ClienteDHCP clienteSeleccionado)
+            {
+                MostrarInformacionCliente(clienteSeleccionado);
+            }
+
+            MessageBox.Show($"Red base cambiada a {nuevaRed}.0/24\nLas IPs han sido reasignadas.",
+                "Red Cambiada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        // Iniciar edición de IP
+        private void BtnEditarIP_Click(object sender, EventArgs e)
+        {
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente && !string.IsNullOrEmpty(cliente.IP))
+            {
+                modoEdicionIP = true;
+                ipOriginalEnEdicion = cliente.IP;
+
+                // Ocultar textbox y mostrar control de edición
+                txtIP.Visible = false;
+                btnEditarIP.Visible = false;
+
+                // Configurar NumericUpDown con el valor actual
+                string[] partes = cliente.IP.Split('.');
+                if (partes.Length == 4)
+                {
+                    nudOcteto4.Value = int.Parse(partes[3]);
+                    nudOcteto4.Visible = true;
+                }
+
+                btnGuardarIP.Visible = true;
+                btnCancelarEdicion.Visible = true;
+            }
+        }
+
+        // Guardar edición de IP
+        private void BtnGuardarIP_Click(object sender, EventArgs e)
+        {
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
+            {
+                string nuevaIP = $"{dhcpManager.RedBase}.{nudOcteto4.Value}";
+
+                // Validar que la IP no esté en uso por otro cliente
+                var clienteExistente = dhcpManager.Clientes
+                    .FirstOrDefault(c => c.IP == nuevaIP && c != cliente);
+
+                if (clienteExistente != null)
+                {
+                    MessageBox.Show($"La IP {nuevaIP} ya está siendo usada por {clienteExistente.Hostname}.\nPor favor elige otra IP.",
+                        "IP Duplicada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // Validar que la IP no esté prevenida
+                if (dhcpManager.IPsReservadas.Contains(nuevaIP) && !cliente.TieneReserva)
+                {
+                    var result = MessageBox.Show($"La IP {nuevaIP} está prevenida/reservada para otro cliente.\n¿Deseas usarla de todas formas?",
+                        "IP Reservada", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                    if (result == DialogResult.No)
+                        return;
+                }
+
+                // Actualizar IP
+                string ipAnterior = cliente.IP;
+                dhcpManager.LiberarIP(ipAnterior);
+                cliente.IP = nuevaIP;
+                dhcpManager.IPsOcupadas.Add(nuevaIP);
+
+                // Salir del modo edición
+                FinalizarEdicionIP();
+
+                // Actualizar vista
+                MostrarInformacionCliente(cliente);
+                ActualizarListBoxClientes();
+
+                MessageBox.Show($"IP cambiada de {ipAnterior} a {nuevaIP}", "IP Actualizada",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        // Cancelar edición de IP
+        private void BtnCancelarEdicion_Click(object sender, EventArgs e)
+        {
+            CancelarEdicionIP();
+        }
+
+        private void CancelarEdicionIP()
+        {
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
+            {
+                cliente.IP = ipOriginalEnEdicion;
+                FinalizarEdicionIP();
+                MostrarInformacionCliente(cliente);
+            }
+        }
+
+        private void FinalizarEdicionIP()
+        {
+            modoEdicionIP = false;
+            txtIP.Visible = true;
+            btnEditarIP.Visible = true;
+            nudOcteto4.Visible = false;
+            btnGuardarIP.Visible = false;
+            btnCancelarEdicion.Visible = false;
+        }
+
         private void BtnAgregarCliente_Click(object sender, EventArgs e)
         {
             // Encontrar el próximo número disponible para el cliente
