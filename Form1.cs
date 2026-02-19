@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Linq;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace SimuladorRedes
@@ -29,10 +28,8 @@ namespace SimuladorRedes
         private Label lblTrafico;
         private Button btnIniciarTrafico;
         private Button btnDetenerTrafico;
-        private Button btnReservarIP;
         private NumericUpDown nudTiempoInactividad;
-        private Button btnPrevenirIP;
-        private Label lblMascara; // Única etiqueta para la máscara
+        private Label lblMascara;
 
         // Botones para activar/desactivar
         private Button btnActivarCliente;
@@ -97,7 +94,7 @@ namespace SimuladorRedes
 
         private void InicializarControles()
         {
-            this.Size = new Size(950, 700);
+            this.Size = new Size(950, 650);
             this.Text = "Simulador de Redes - DHCP";
 
             // Panel superior para controles adicionales
@@ -168,7 +165,7 @@ namespace SimuladorRedes
             listBoxClientes = new ListBox
             {
                 Location = new Point(12, 130),
-                Size = new Size(250, 450),
+                Size = new Size(250, 400),
                 DisplayMember = "Hostname"
             };
             listBoxClientes.SelectedIndexChanged += ListBoxClientes_SelectedIndexChanged;
@@ -177,7 +174,7 @@ namespace SimuladorRedes
             panelInfoCliente = new Panel
             {
                 Location = new Point(270, 130),
-                Size = new Size(650, 500),
+                Size = new Size(650, 450),
                 BorderStyle = BorderStyle.FixedSingle
             };
 
@@ -298,28 +295,18 @@ namespace SimuladorRedes
             groupTrafico.Controls.AddRange(new Control[] { trackTrafico, lblTrafico, btnIniciarTrafico, btnDetenerTrafico });
             panelInfoCliente.Controls.Add(groupTrafico);
 
-            // Botón Reservar IP
-            yPos += 130;
-            btnReservarIP = new Button
-            {
-                Text = "Reservar IP Actual",
-                Location = new Point(10, yPos),
-                Size = new Size(150, 30)
-            };
-            btnReservarIP.Click += BtnReservarIP_Click;
-            panelInfoCliente.Controls.Add(btnReservarIP);
-
             // Control para tiempo de inactividad
+            yPos += 130;
             Label lblTiempoInactividad = new Label
             {
                 Text = "Tiempo inactividad (seg):",
-                Location = new Point(170, yPos),
+                Location = new Point(10, yPos),
                 Size = new Size(150, 25)
             };
 
             nudTiempoInactividad = new NumericUpDown
             {
-                Location = new Point(320, yPos),
+                Location = new Point(160, yPos),
                 Size = new Size(60, 25),
                 Minimum = 5,
                 Maximum = 60,
@@ -329,17 +316,6 @@ namespace SimuladorRedes
                 dhcpManager.TiempoInactividadLimite = (int)nudTiempoInactividad.Value;
 
             panelInfoCliente.Controls.AddRange(new Control[] { lblTiempoInactividad, nudTiempoInactividad });
-
-            // Botón Prevenir IP
-            yPos += spacing;
-            btnPrevenirIP = new Button
-            {
-                Text = "Prevenir IP Actual",
-                Location = new Point(10, yPos),
-                Size = new Size(150, 30)
-            };
-            btnPrevenirIP.Click += BtnPrevenirIP_Click;
-            panelInfoCliente.Controls.Add(btnPrevenirIP);
 
             // Botones para activar/desactivar
             yPos += spacing;
@@ -364,8 +340,8 @@ namespace SimuladorRedes
             btnDesactivarCliente.Click += BtnDesactivarCliente_Click;
             panelInfoCliente.Controls.Add(btnDesactivarCliente);
 
-            // Mostrar máscara de red calculada (ÚNICA etiqueta)
-            yPos += spacing + 10;
+            // Mostrar máscara de red calculada
+            yPos += spacing;
             lblMascara = new Label
             {
                 Text = $"Máscara de red: {CalcularMascaraPorIP("192.168.1.1")}",
@@ -440,11 +416,9 @@ namespace SimuladorRedes
 
             btnIniciarTrafico.Enabled = cliente.Activo && !cliente.MedicionActiva;
             btnDetenerTrafico.Enabled = cliente.MedicionActiva;
-            btnReservarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
-            btnPrevenirIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
         }
 
-        // Método para calcular máscara basada en IP (simplificado)
+        // Método para calcular máscara basada en IP
         private string CalcularMascaraPorIP(string ip)
         {
             try
@@ -540,7 +514,7 @@ namespace SimuladorRedes
                     return;
                 }
 
-                // Validar que la IP no esté prevenida
+                // Validar que la IP no esté prevenida (esto sigue estando en el código interno)
                 if (dhcpManager.IPsReservadas.Contains(nuevaIP) && !cliente.TieneReserva)
                 {
                     var result = MessageBox.Show($"La IP {nuevaIP} está prevenida/reservada para otro cliente.\n¿Deseas usarla de todas formas?",
@@ -658,25 +632,6 @@ namespace SimuladorRedes
                 lblTrafico.Text = "0 Mbps";
                 btnIniciarTrafico.Enabled = true;
                 btnDetenerTrafico.Enabled = false;
-            }
-        }
-
-        private void BtnReservarIP_Click(object sender, EventArgs e)
-        {
-            if (listBoxClientes.SelectedItem is ClienteDHCP cliente && !string.IsNullOrEmpty(cliente.IP))
-            {
-                dhcpManager.ReservarIP(cliente.MacAddress, cliente.IP);
-                MessageBox.Show($"IP {cliente.IP} reservada para {cliente.Hostname}", "Reserva Exitosa");
-                ActualizarListBoxClientes();
-            }
-        }
-
-        private void BtnPrevenirIP_Click(object sender, EventArgs e)
-        {
-            if (listBoxClientes.SelectedItem is ClienteDHCP cliente && !string.IsNullOrEmpty(cliente.IP))
-            {
-                dhcpManager.PrevenirIP(cliente.IP);
-                MessageBox.Show($"IP {cliente.IP} prevenida/pre-reservada", "IP Prevenida");
             }
         }
 
