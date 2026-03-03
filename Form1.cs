@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Drawing;
+using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Windows.Forms;
@@ -8,6 +10,7 @@ namespace SimuladorRedes
 {
     public partial class Form1 : Form
     {
+        private Button btnAbrirCarpetaLog;
         private MenuStrip menuStrip;
         private ToolStripMenuItem dhcpMenuItem;
         private ToolStripMenuItem dnsMenuItem;
@@ -17,6 +20,13 @@ namespace SimuladorRedes
         private ListBox listBoxClientes;
         private Panel panelInfoCliente;
         private DHCPManager dhcpManager;
+
+        // Referencia estática para compartir con DNS
+        public static DHCPManager DHCPManagerInstance { get; private set; }
+
+        // Eventos estáticos para comunicación con DNS
+        public static event Action<DispositivoDNS> DispositivoDNSAgregado;
+        public static event Action<DispositivoDNS> DispositivoDNSEliminado;
 
         // Controles para mostrar información del cliente
         private TextBox txtMac;
@@ -55,18 +65,55 @@ namespace SimuladorRedes
 
             // PRIMERO inicializar el DHCPManager
             dhcpManager = new DHCPManager();
+            DHCPManagerInstance = dhcpManager;
+
+            // Suscribir eventos de DHCP
             dhcpManager.ClienteDesactivado += OnClienteDesactivado;
+            dhcpManager.ClienteAgregado += OnClienteAgregado;
+            dhcpManager.ClienteEliminado += OnClienteEliminado;
+            dhcpManager.IPCambio += OnIPCambio;
+
+            // Suscribir eventos estáticos de DNS (para comunicación bidireccional)
+            DispositivoDNSAgregado += OnDispositivoDNSAgregado;
+            DispositivoDNSEliminado += OnDispositivoDNSEliminado;
 
             // DESPUÉS inicializar la interfaz
             InicializarMenu();
             InicializarControles();
 
-            // Agregar clientes de ejemplo
-            dhcpManager.AgregarClienteEjemplo(1);
-            dhcpManager.AgregarClienteEjemplo(2);
+            // Crear clientes con la misma estructura que DNS
+            CrearClientesConEstructuraDNS();
+
+            // Iniciar medición de tráfico para todos los clientes
+            foreach (var cliente in dhcpManager.Clientes)
+            {
+                int valorInicial = 20 + (cliente.GetHashCode() % 50);
+                cliente.IniciarMedicionTrafico(Math.Max(20, Math.Min(70, valorInicial)));
+            }
 
             ActualizarListBoxClientes();
             ActualizarTotalClientes();
+        }
+
+        private void CrearClientesConEstructuraDNS()
+        {
+            // ===== GOOGLE.COM (Clase A) =====
+            dhcpManager.AgregarClienteEjemplo("google", "10.0.0.1", "00:00:00:00:01:00", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("marketing", "10.0.1.1", "00:00:00:01:00:00", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("pc-ana", "10.0.1.10", "00:11:22:33:44:01", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("pc-luis", "10.0.1.11", "00:11:22:33:44:02", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("compras", "10.0.2.1", "00:00:00:02:00:00", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("pc-carlos", "10.0.2.10", "00:11:22:33:44:03", "google.com", "Google", "10.0.0");
+            dhcpManager.AgregarClienteEjemplo("pc-maria", "10.0.2.11", "00:11:22:33:44:04", "google.com", "Google", "10.0.0");
+
+            // ===== TECNM.MX (Clase C) =====
+            dhcpManager.AgregarClienteEjemplo("tecnm", "192.168.1.1", "00:00:00:03:00:00", "tecnm.mx", "TecNM", "192.168.1");
+            dhcpManager.AgregarClienteEjemplo("isc", "192.168.2.1", "00:00:00:04:00:00", "tecnm.mx", "TecNM", "192.168.2");
+            dhcpManager.AgregarClienteEjemplo("server-isc", "192.168.2.10", "00:11:22:33:44:05", "tecnm.mx", "TecNM", "192.168.2");
+            dhcpManager.AgregarClienteEjemplo("lab-isc", "192.168.2.11", "00:11:22:33:44:06", "tecnm.mx", "TecNM", "192.168.2");
+            dhcpManager.AgregarClienteEjemplo("ige", "192.168.3.1", "00:00:00:05:00:00", "tecnm.mx", "TecNM", "192.168.3");
+            dhcpManager.AgregarClienteEjemplo("server-ige", "192.168.3.10", "00:11:22:33:44:07", "tecnm.mx", "TecNM", "192.168.3");
+            dhcpManager.AgregarClienteEjemplo("lab-ige", "192.168.3.11", "00:11:22:33:44:08", "tecnm.mx", "TecNM", "192.168.3");
         }
 
         private void InicializarMenu()
@@ -77,8 +124,15 @@ namespace SimuladorRedes
             dhcpMenuItem.Click += (s, e) => MostrarPanelDHCP();
 
             dnsMenuItem = new ToolStripMenuItem("DNS");
+            dnsMenuItem.Click += (s, e) => MostrarPanelDNS();
+
             httpMenuItem = new ToolStripMenuItem("HTTP");
+            httpMenuItem.Click += (s, e) => MessageBox.Show("Funcionalidad HTTP en desarrollo", "HTTP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+
             ftpMenuItem = new ToolStripMenuItem("FTP");
+            ftpMenuItem.Click += (s, e) => MessageBox.Show("Funcionalidad FTP en desarrollo", "FTP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             menuStrip.Items.AddRange(new ToolStripItem[]
             {
@@ -101,7 +155,7 @@ namespace SimuladorRedes
             Panel panelSuperior = new Panel
             {
                 Location = new Point(12, 40),
-                Size = new Size(900, 80),
+                Size = new Size(900, 50),
                 BorderStyle = BorderStyle.None
             };
 
@@ -119,46 +173,26 @@ namespace SimuladorRedes
             // Label para mostrar total de clientes
             lblTotalClientes = new Label
             {
-                Text = "Total clientes: 2",
+                Text = "Total clientes: 14",
                 Location = new Point(200, 15),
                 Size = new Size(150, 25),
                 Font = new Font("Arial", 10, FontStyle.Bold)
             };
-
-            // Control para cambiar la red base
-            Label lblRedBase = new Label
+            btnAbrirCarpetaLog = new Button
             {
-                Text = "Red Base:",
-                Location = new Point(350, 15),
-                Size = new Size(70, 25)
+                Text = "📂 Logs",
+                Location = new Point(360, 10),  // ← Posición X=360, Y=10
+                Size = new Size(80, 30),
+                BackColor = Color.LightGreen,
+                FlatStyle = FlatStyle.Flat
             };
-
-            cmbRedBase = new ComboBox
-            {
-                Location = new Point(420, 12),
-                Size = new Size(120, 25),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbRedBase.Items.AddRange(new string[] { "192.168.1", "192.168.0", "10.0.0", "172.16.0" });
-            cmbRedBase.SelectedItem = "192.168.1";
-            cmbRedBase.SelectedIndexChanged += CmbRedBase_SelectedIndexChanged;
-
-            // Label para información de red
-            lblInfoRed = new Label
-            {
-                Text = $"Máscara actual: {dhcpManager.MascaraRed}",
-                Location = new Point(550, 15),
-                Size = new Size(300, 25),
-                Font = new Font("Arial", 9, FontStyle.Regular)
-            };
+            btnAbrirCarpetaLog.Click += (s, e) => AbrirCarpetaLog();
 
             panelSuperior.Controls.AddRange(new Control[]
             {
-                btnAgregarCliente,
-                lblTotalClientes,
-                lblRedBase,
-                cmbRedBase,
-                lblInfoRed
+        btnAgregarCliente,
+        lblTotalClientes,
+        btnAbrirCarpetaLog
             });
 
             // ListBox de clientes
@@ -241,7 +275,17 @@ namespace SimuladorRedes
             yPos += spacing;
             Label lblHostname = new Label { Text = "HOSTNAME:", Location = new Point(10, yPos), Size = new Size(80, 25) };
             txtHostname = new TextBox { Location = new Point(100, yPos), Size = new Size(200, 25), ReadOnly = true };
-            panelInfoCliente.Controls.AddRange(new Control[] { lblHostname, txtHostname });
+
+            // Label para mostrar organización
+            Label lblOrganizacion = new Label
+            {
+                Text = "",
+                Location = new Point(310, yPos),
+                Size = new Size(150, 25),
+                Font = new Font("Arial", 9, FontStyle.Bold)
+            };
+
+            panelInfoCliente.Controls.AddRange(new Control[] { lblHostname, txtHostname, lblOrganizacion });
 
             // Activo
             yPos += spacing;
@@ -355,6 +399,8 @@ namespace SimuladorRedes
             this.Controls.Add(panelSuperior);
             this.Controls.Add(listBoxClientes);
             this.Controls.Add(panelInfoCliente);
+
+
         }
 
         private void MostrarPanelDHCP()
@@ -362,6 +408,12 @@ namespace SimuladorRedes
             listBoxClientes.Visible = true;
             panelInfoCliente.Visible = true;
             this.Text = "Simulador de Redes - DHCP";
+        }
+
+        private void MostrarPanelDNS()
+        {
+            FormDNS formDNS = new FormDNS();
+            formDNS.ShowDialog();
         }
 
         private void ActualizarListBoxClientes()
@@ -379,7 +431,6 @@ namespace SimuladorRedes
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
             {
-                // Salir del modo edición si estábamos en él
                 if (modoEdicionIP)
                 {
                     CancelarEdicionIP();
@@ -395,30 +446,44 @@ namespace SimuladorRedes
             txtHostname.Text = cliente.Hostname;
             chkActivo.Checked = cliente.Activo;
 
-            // Actualizar la máscara de red según la IP del cliente seleccionado
+            // Mostrar organización
+            var lblOrganizacion = panelInfoCliente.Controls.OfType<Label>()
+                .FirstOrDefault(l => l.Location.Y == 125 && l.Location.X == 310);
+            if (lblOrganizacion != null)
+            {
+                lblOrganizacion.Text = $"[{cliente.Organizacion}]";
+                if (cliente.Organizacion == "TecNM")
+                    lblOrganizacion.ForeColor = Color.Green;
+                else if (cliente.Organizacion == "Google")
+                    lblOrganizacion.ForeColor = Color.Blue;
+            }
+
             if (!string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
             {
                 lblMascara.Text = $"Máscara de red: {CalcularMascaraPorIP(cliente.IP)}";
             }
             else
             {
-                lblMascara.Text = $"Máscara de red: {CalcularMascaraPorIP(dhcpManager.RedBase + ".1")}";
+                lblMascara.Text = $"Máscara de red: {CalcularMascaraPorIP("192.168.1.1")}";
             }
 
-            // Actualizar estado de botones según si el cliente está activo
             btnActivarCliente.Enabled = !cliente.Activo;
             btnDesactivarCliente.Enabled = cliente.Activo;
-            btnEditarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP);
+            btnEditarIP.Enabled = cliente.Activo && !string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada";
 
-            // Actualizar controles de tráfico
-            trackTrafico.Value = cliente.Trafico;
+            int traficoValor = cliente.Trafico;
+            if (traficoValor < trackTrafico.Minimum)
+                traficoValor = trackTrafico.Minimum;
+            else if (traficoValor > trackTrafico.Maximum)
+                traficoValor = trackTrafico.Maximum;
+
+            trackTrafico.Value = traficoValor;
             lblTrafico.Text = $"{cliente.Trafico} Mbps";
 
             btnIniciarTrafico.Enabled = cliente.Activo && !cliente.MedicionActiva;
             btnDetenerTrafico.Enabled = cliente.MedicionActiva;
         }
 
-        // Método para calcular máscara basada en IP
         private string CalcularMascaraPorIP(string ip)
         {
             try
@@ -445,45 +510,23 @@ namespace SimuladorRedes
             return "255.255.255.0 (Estándar)";
         }
 
-        // Cambiar red base
         private void CmbRedBase_SelectedIndexChanged(object sender, EventArgs e)
         {
-            string nuevaRed = cmbRedBase.SelectedItem.ToString();
-            dhcpManager.CambiarRedBase(nuevaRed);
-            lblInfoRed.Text = $"Red base: {nuevaRed}";
-
-            // Reasignar IPs a todos los clientes
-            foreach (var cliente in dhcpManager.Clientes)
-            {
-                string ipAnterior = cliente.IP;
-                cliente.IP = dhcpManager.AsignarIP(cliente);
-            }
-
-            ActualizarListBoxClientes();
-
-            // Actualizar la máscara si hay un cliente seleccionado
-            if (listBoxClientes.SelectedItem is ClienteDHCP clienteSeleccionado)
-            {
-                MostrarInformacionCliente(clienteSeleccionado);
-            }
-
-            MessageBox.Show($"Red base cambiada a {nuevaRed}.0/24\nLas IPs han sido reasignadas.",
-                "Red Cambiada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("No se puede cambiar la red base porque hay múltiples redes activas.\n" +
+                "TecNM usa Clase C (192.168.x.x) y Google usa Clase A (10.0.x.x)",
+                "Operación no disponible", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        // Iniciar edición de IP
         private void BtnEditarIP_Click(object sender, EventArgs e)
         {
-            if (listBoxClientes.SelectedItem is ClienteDHCP cliente && !string.IsNullOrEmpty(cliente.IP))
+            if (listBoxClientes.SelectedItem is ClienteDHCP cliente && !string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
             {
                 modoEdicionIP = true;
                 ipOriginalEnEdicion = cliente.IP;
 
-                // Ocultar textbox y mostrar control de edición
                 txtIP.Visible = false;
                 btnEditarIP.Visible = false;
 
-                // Configurar NumericUpDown con el valor actual
                 string[] partes = cliente.IP.Split('.');
                 if (partes.Length == 4)
                 {
@@ -496,14 +539,13 @@ namespace SimuladorRedes
             }
         }
 
-        // Guardar edición de IP
         private void BtnGuardarIP_Click(object sender, EventArgs e)
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
             {
-                string nuevaIP = $"{dhcpManager.RedBase}.{nudOcteto4.Value}";
+                string redBase = cliente.RedBase;
+                string nuevaIP = $"{redBase}.{nudOcteto4.Value}";
 
-                // Validar que la IP no esté en uso por otro cliente
                 var clienteExistente = dhcpManager.Clientes
                     .FirstOrDefault(c => c.IP == nuevaIP && c != cliente);
 
@@ -514,7 +556,6 @@ namespace SimuladorRedes
                     return;
                 }
 
-                // Validar que la IP no esté prevenida (esto sigue estando en el código interno)
                 if (dhcpManager.IPsReservadas.Contains(nuevaIP) && !cliente.TieneReserva)
                 {
                     var result = MessageBox.Show($"La IP {nuevaIP} está prevenida/reservada para otro cliente.\n¿Deseas usarla de todas formas?",
@@ -524,25 +565,24 @@ namespace SimuladorRedes
                         return;
                 }
 
-                // Actualizar IP
                 string ipAnterior = cliente.IP;
-                dhcpManager.LiberarIP(ipAnterior);
+                dhcpManager.LiberarIP(ipAnterior, cliente);
                 cliente.IP = nuevaIP;
                 dhcpManager.IPsOcupadas.Add(nuevaIP);
 
-                // Salir del modo edición
                 FinalizarEdicionIP();
 
-                // Actualizar vista
                 MostrarInformacionCliente(cliente);
                 ActualizarListBoxClientes();
+
+                // Usar el evento en lugar del método directo
+                dhcpManager.NotificarIPCambio(cliente, ipAnterior, nuevaIP);
 
                 MessageBox.Show($"IP cambiada de {ipAnterior} a {nuevaIP}", "IP Actualizada",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
-        // Cancelar edición de IP
         private void BtnCancelarEdicion_Click(object sender, EventArgs e)
         {
             CancelarEdicionIP();
@@ -570,38 +610,100 @@ namespace SimuladorRedes
 
         private void BtnAgregarCliente_Click(object sender, EventArgs e)
         {
-            // Encontrar el próximo número disponible para el cliente
-            int nextNumber = 1;
-            var existingNumbers = dhcpManager.Clientes
-                .Select(c => int.Parse(c.Hostname.Replace("Cliente-", "")))
-                .OrderBy(n => n)
-                .ToList();
-
-            // Buscar el primer número no utilizado
-            foreach (int num in existingNumbers)
+            using (Form dialogo = new Form())
             {
-                if (num == nextNumber)
-                    nextNumber++;
-                else
-                    break;
+                dialogo.Text = "Agregar Nuevo Cliente";
+                dialogo.Size = new Size(300, 300);
+                dialogo.StartPosition = FormStartPosition.CenterParent;
+                dialogo.FormBorderStyle = FormBorderStyle.FixedDialog;
+
+                Label lblNombre = new Label { Text = "Nombre:", Location = new Point(10, 20), Size = new Size(80, 25) };
+                TextBox txtNombre = new TextBox { Location = new Point(100, 20), Size = new Size(150, 25) };
+
+                Label lblDominio = new Label { Text = "Dominio:", Location = new Point(10, 60), Size = new Size(80, 25) };
+                ComboBox cmbDominio = new ComboBox
+                {
+                    Location = new Point(100, 60),
+                    Size = new Size(150, 25),
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                cmbDominio.Items.AddRange(new string[] { "google.com", "tecnm.mx", "local" });
+                cmbDominio.SelectedIndex = 0;
+
+                Label lblOrganizacion = new Label { Text = "Org:", Location = new Point(10, 100), Size = new Size(80, 25) };
+                ComboBox cmbOrganizacion = new ComboBox
+                {
+                    Location = new Point(100, 100),
+                    Size = new Size(150, 25),
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                cmbOrganizacion.Items.AddRange(new string[] { "Google", "TecNM", "Otro" });
+                cmbOrganizacion.SelectedIndex = 0;
+
+                cmbDominio.SelectedIndexChanged += (s, ev) =>
+                {
+                    if (cmbDominio.SelectedItem.ToString() == "google.com")
+                        cmbOrganizacion.SelectedItem = "Google";
+                    else if (cmbDominio.SelectedItem.ToString() == "tecnm.mx")
+                        cmbOrganizacion.SelectedItem = "TecNM";
+                    else
+                        cmbOrganizacion.SelectedItem = "Otro";
+                };
+
+                Button btnAceptar = new Button
+                {
+                    Text = "Aceptar",
+                    Location = new Point(50, 200),
+                    Size = new Size(80, 30),
+                    DialogResult = DialogResult.OK
+                };
+
+                Button btnCancelar = new Button
+                {
+                    Text = "Cancelar",
+                    Location = new Point(150, 200),
+                    Size = new Size(80, 30),
+                    DialogResult = DialogResult.Cancel
+                };
+
+                dialogo.Controls.AddRange(new Control[] { lblNombre, txtNombre, lblDominio, cmbDominio,
+                    lblOrganizacion, cmbOrganizacion, btnAceptar, btnCancelar });
+
+                if (dialogo.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(txtNombre.Text))
+                {
+                    string dominio = cmbDominio.SelectedItem.ToString();
+                    string organizacion = cmbOrganizacion.SelectedItem.ToString();
+
+                    string redBase;
+                    if (dominio == "google.com")
+                        redBase = "10.0.0";
+                    else if (dominio == "tecnm.mx")
+                        redBase = "192.168.1";
+                    else
+                        redBase = "192.168.0";
+
+                    int ultimoOcteto = 20;
+                    string ip;
+                    do
+                    {
+                        ip = $"{redBase}.{ultimoOcteto}";
+                        ultimoOcteto++;
+                    } while (dhcpManager.IPsOcupadas.Contains(ip) && ultimoOcteto < 255);
+
+                    string mac = $"00:1A:2B:3C:{dhcpManager.Clientes.Count:D2}:{dhcpManager.Clientes.Count:D2}";
+
+                    dhcpManager.AgregarClienteEjemplo(txtNombre.Text, ip, mac, dominio, organizacion, redBase);
+
+                    var nuevoCliente = dhcpManager.Clientes.Last();
+                    nuevoCliente.IniciarMedicionTrafico(30);
+
+                    ActualizarListBoxClientes();
+                    ActualizarTotalClientes();
+
+                    MessageBox.Show($"Cliente {txtNombre.Text} agregado con IP {ip}",
+                        "Cliente Agregado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
-
-            // Agregar el nuevo cliente
-            dhcpManager.AgregarClienteEjemplo(nextNumber);
-
-            // Actualizar la interfaz
-            ActualizarListBoxClientes();
-            ActualizarTotalClientes();
-
-            // Seleccionar el nuevo cliente automáticamente
-            var nuevoCliente = dhcpManager.Clientes.FirstOrDefault(c => c.Hostname == $"Cliente-{nextNumber}");
-            if (nuevoCliente != null)
-            {
-                listBoxClientes.SelectedItem = nuevoCliente;
-            }
-
-            MessageBox.Show($"Nuevo cliente Cliente-{nextNumber} agregado exitosamente.\nMAC: {nuevoCliente.MacAddress}\nIP: {nuevoCliente.IP}",
-                "Cliente Agregado", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void TrackTrafico_Scroll(object sender, EventArgs e)
@@ -639,10 +741,22 @@ namespace SimuladorRedes
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
             {
+                string ipAnterior = cliente.IP;
                 cliente.Activar();
+
                 MostrarInformacionCliente(cliente);
                 ActualizarListBoxClientes();
-                MessageBox.Show($"Cliente {cliente.Hostname} activado manualmente", "Cliente Activado");
+
+                if (ipAnterior == "No asignada" && cliente.IP != "No asignada")
+                {
+                    MessageBox.Show($"Cliente {cliente.Hostname} activado.\nIP asignada: {cliente.IP}",
+                        "Cliente Activado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show($"Cliente {cliente.Hostname} activado",
+                        "Cliente Activado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
         }
 
@@ -650,13 +764,26 @@ namespace SimuladorRedes
         {
             if (listBoxClientes.SelectedItem is ClienteDHCP cliente)
             {
+                string ipLiberada = cliente.IP;
                 cliente.Desactivar();
+
                 MostrarInformacionCliente(cliente);
                 ActualizarListBoxClientes();
-                MessageBox.Show($"Cliente {cliente.Hostname} desactivado manualmente", "Cliente Desactivado");
+
+                if (!string.IsNullOrEmpty(ipLiberada) && ipLiberada != "No asignada" && !cliente.TieneReserva)
+                {
+                    MessageBox.Show($"Cliente {cliente.Hostname} desactivado.\nIP {ipLiberada} liberada.",
+                        "Cliente Desactivado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show($"Cliente {cliente.Hostname} desactivado manualmente",
+                        "Cliente Desactivado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
         }
 
+        // Manejadores de eventos de DHCP
         private void OnClienteDesactivado(ClienteDHCP cliente)
         {
             if (this.InvokeRequired)
@@ -670,16 +797,191 @@ namespace SimuladorRedes
                 MostrarInformacionCliente(cliente);
             }
 
-            // Actualizar el ListBox para reflejar el cambio
             ActualizarListBoxClientes();
+        }
 
-            MessageBox.Show($"Cliente {cliente.Hostname} desactivado por inactividad", "Cliente Inactivo");
+        private void OnClienteAgregado(ClienteDHCP cliente)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => OnClienteAgregado(cliente)));
+                return;
+            }
+
+            ActualizarListBoxClientes();
+            ActualizarTotalClientes();
+        }
+
+        private void OnClienteEliminado(ClienteDHCP cliente)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => OnClienteEliminado(cliente)));
+                return;
+            }
+
+            ActualizarListBoxClientes();
+            ActualizarTotalClientes();
+        }
+
+        private void OnIPCambio(ClienteDHCP cliente, string ipAnterior, string ipNueva)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => OnIPCambio(cliente, ipAnterior, ipNueva)));
+                return;
+            }
+
+            if (listBoxClientes.SelectedItem == cliente)
+            {
+                MostrarInformacionCliente(cliente);
+            }
+        }
+
+        // Manejadores de eventos de DNS
+        private void OnDispositivoDNSAgregado(DispositivoDNS dispositivo)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => OnDispositivoDNSAgregado(dispositivo)));
+                return;
+            }
+
+            // Verificar si ya existe en DHCP
+            var existe = dhcpManager.Clientes.Any(c => c.Hostname == dispositivo.Nombre && c.Dominio == dispositivo.Dominio);
+
+            if (!existe && !string.IsNullOrEmpty(dispositivo.IP))
+            {
+                string redBase = "192.168.1";
+                if (dispositivo.Dominio.Contains("google"))
+                    redBase = "10.0.0";
+                else if (dispositivo.Dominio.Contains("tecnm"))
+                    redBase = "192.168.1";
+
+                dhcpManager.AgregarCliente(
+                    dispositivo.Nombre,
+                    dispositivo.IP,
+                    dispositivo.MacAddress,
+                    dispositivo.Dominio,
+                    dispositivo.TipoOrganizacion.ToString(),
+                    redBase
+                );
+
+                ActualizarListBoxClientes();
+                ActualizarTotalClientes();
+
+                MessageBox.Show($"Cliente {dispositivo.Nombre} agregado desde DNS.",
+                    "Sincronización", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void OnDispositivoDNSEliminado(DispositivoDNS dispositivo)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => OnDispositivoDNSEliminado(dispositivo)));
+                return;
+            }
+
+            bool eliminado = dhcpManager.EliminarClientePorHostname(dispositivo.Nombre);
+
+            if (eliminado)
+            {
+                ActualizarListBoxClientes();
+                ActualizarTotalClientes();
+
+                MessageBox.Show($"Cliente {dispositivo.Nombre} eliminado desde DNS.",
+                    "Sincronización", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             dhcpManager?.DetenerTodosLosTimers();
             base.OnFormClosing(e);
+        }
+        public void NotificarDispositivoDNSAgregado(DispositivoDNS dispositivo)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => NotificarDispositivoDNSAgregado(dispositivo)));
+                return;
+            }
+
+            // Aquí va la lógica para agregar el dispositivo a DHCP
+            var existe = dhcpManager.Clientes.Any(c => c.Hostname == dispositivo.Nombre && c.Dominio == dispositivo.Dominio);
+
+            if (!existe && !string.IsNullOrEmpty(dispositivo.IP))
+            {
+                string redBase = "192.168.1";
+                if (dispositivo.Dominio.Contains("google"))
+                    redBase = "10.0.0";
+                else if (dispositivo.Dominio.Contains("tecnm"))
+                    redBase = "192.168.1";
+
+                dhcpManager.AgregarCliente(
+                    dispositivo.Nombre,
+                    dispositivo.IP,
+                    dispositivo.MacAddress,
+                    dispositivo.Dominio,
+                    dispositivo.TipoOrganizacion.ToString(),
+                    redBase
+                );
+
+                ActualizarListBoxClientes();
+                ActualizarTotalClientes();
+
+                MessageBox.Show($"Cliente {dispositivo.Nombre} agregado desde DNS.",
+                    "Sincronización", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        public void NotificarDispositivoDNSEliminado(DispositivoDNS dispositivo)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => NotificarDispositivoDNSEliminado(dispositivo)));
+                return;
+            }
+
+            bool eliminado = dhcpManager.EliminarClientePorHostname(dispositivo.Nombre);
+
+            if (eliminado)
+            {
+                ActualizarListBoxClientes();
+                ActualizarTotalClientes();
+
+                MessageBox.Show($"Cliente {dispositivo.Nombre} eliminado desde DNS.",
+                    "Sincronización", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+        private void AbrirCarpetaLog()
+        {
+            try
+            {
+                string rutaLog = Path.Combine(Application.StartupPath, "simulador_log.txt");
+                string carpeta = Path.GetDirectoryName(rutaLog);
+
+                if (Directory.Exists(carpeta))
+                {
+                    // Abrir la carpeta en el explorador de Windows
+                    System.Diagnostics.Process.Start("explorer.exe", carpeta);
+
+                    // También podemos hacer un log de esta acción
+                    // Asumiendo que tienes un sistema de logging
+                        Logger.Log("Carpeta de logs abierta en explorador");
+                }
+                else
+                {
+                    MessageBox.Show("No se pudo encontrar la carpeta de logs.",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al abrir carpeta: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }

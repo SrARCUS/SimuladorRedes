@@ -16,9 +16,13 @@ namespace SimuladorRedes
         public List<string> IPsOcupadas { get; private set; }
 
         private Timer timerVerificacionInactividad;
-        public int TiempoInactividadLimite { get; set; } = 10; // segundos
+        public int TiempoInactividadLimite { get; set; } = 10;
 
+        // Eventos para notificar cambios
         public event Action<ClienteDHCP> ClienteDesactivado;
+        public event Action<ClienteDHCP> ClienteAgregado;
+        public event Action<ClienteDHCP> ClienteEliminado;
+        public event Action<ClienteDHCP, string, string> IPCambio;
 
         public DHCPManager()
         {
@@ -34,7 +38,6 @@ namespace SimuladorRedes
 
         private void CalcularMascaraRed()
         {
-            // Cálculo automático de máscara de red basado en el prefijo
             uint mascaraBits = 0xFFFFFFFF << (32 - PrefijoRed);
             byte[] bytes = BitConverter.GetBytes(mascaraBits);
             if (BitConverter.IsLittleEndian)
@@ -54,8 +57,9 @@ namespace SimuladorRedes
 
         public string AsignarIP(ClienteDHCP cliente)
         {
-            // Verificar si tiene IP reservada
-            if (cliente.TieneReserva && !string.IsNullOrEmpty(cliente.IP))
+            string redBase = !string.IsNullOrEmpty(cliente.RedBase) ? cliente.RedBase : RedBase;
+
+            if (cliente.TieneReserva && !string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
             {
                 if (!IPsOcupadas.Contains(cliente.IP))
                 {
@@ -64,10 +68,9 @@ namespace SimuladorRedes
                 }
             }
 
-            // Asignar IP disponible
-            for (int i = 2; i < 255; i++) // Saltamos .0 y .1 (red y gateway)
+            for (int i = 2; i < 255; i++)
             {
-                string ipPosible = $"{RedBase}.{i}";
+                string ipPosible = $"{redBase}.{i}";
                 if (!IPsOcupadas.Contains(ipPosible) && !IPsReservadas.Contains(ipPosible))
                 {
                     IPsOcupadas.Add(ipPosible);
@@ -79,17 +82,81 @@ namespace SimuladorRedes
             return "No disponible";
         }
 
+        public void AgregarCliente(string hostname, string ip, string mac, string dominio, string organizacion, string redBase)
+        {
+            var cliente = new ClienteDHCP(mac, hostname, dominio, organizacion, redBase);
+            cliente.IP = ip;
+            cliente.Manager = this;
+            Clientes.Add(cliente);
+            IPsOcupadas.Add(ip);
+
+            ClienteAgregado?.Invoke(cliente);
+        }
+
+        public void AgregarClienteEjemplo(string hostname, string ip, string mac, string dominio, string organizacion, string redBase)
+        {
+            AgregarCliente(hostname, ip, mac, dominio, organizacion, redBase);
+        }
+
+        public bool EliminarCliente(ClienteDHCP cliente)
+        {
+            if (cliente == null) return false;
+
+            if (Clientes.Contains(cliente))
+            {
+                if (!string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
+                {
+                    IPsOcupadas.Remove(cliente.IP);
+                }
+
+                cliente.Desactivar();
+                Clientes.Remove(cliente);
+
+                ClienteEliminado?.Invoke(cliente);
+                return true;
+            }
+            return false;
+        }
+
+        public bool EliminarClientePorHostname(string hostname)
+        {
+            var cliente = Clientes.FirstOrDefault(c => c.Hostname == hostname);
+            if (cliente != null)
+            {
+                return EliminarCliente(cliente);
+            }
+            return false;
+        }
+
+        public void ActualizarIP(ClienteDHCP cliente, string nuevaIP)
+        {
+            if (cliente == null || string.IsNullOrEmpty(nuevaIP))
+                return;
+
+            string ipAnterior = cliente.IP;
+
+            if (!string.IsNullOrEmpty(ipAnterior) && ipAnterior != "No asignada")
+            {
+                IPsOcupadas.Remove(ipAnterior);
+            }
+
+            cliente.IP = nuevaIP;
+            IPsOcupadas.Add(nuevaIP);
+
+            IPCambio?.Invoke(cliente, ipAnterior, nuevaIP);
+        }
+
         public void ReservarIP(string macAddress, string ip)
         {
             var cliente = Clientes.FirstOrDefault(c => c.MacAddress == macAddress);
             if (cliente != null)
             {
-                // Liberar IP anterior si tenía
-                if (!string.IsNullOrEmpty(cliente.IP))
+                if (!string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
                 {
                     IPsOcupadas.Remove(cliente.IP);
                 }
 
+                string ipAnterior = cliente.IP;
                 cliente.IP = ip;
                 cliente.TieneReserva = true;
 
@@ -98,17 +165,34 @@ namespace SimuladorRedes
 
                 if (!IPsOcupadas.Contains(ip))
                     IPsOcupadas.Add(ip);
+
+                IPCambio?.Invoke(cliente, ipAnterior, ip);
             }
         }
 
-        public void LiberarIP(string ip)
+        public void LiberarIP(string ip, ClienteDHCP cliente = null)
         {
-            IPsOcupadas.Remove(ip);
-            var cliente = Clientes.FirstOrDefault(c => c.IP == ip);
             if (cliente != null)
             {
-                cliente.IP = null;
+                if (cliente.TieneReserva)
+                    return;
+
+                string ipAnterior = cliente.IP;
+                cliente.IP = "No asignada";
+                IPCambio?.Invoke(cliente, ipAnterior, "No asignada");
             }
+            else
+            {
+                var clienteConIP = Clientes.FirstOrDefault(c => c.IP == ip);
+                if (clienteConIP != null && !clienteConIP.TieneReserva)
+                {
+                    string ipAnterior = clienteConIP.IP;
+                    clienteConIP.IP = "No asignada";
+                    IPCambio?.Invoke(clienteConIP, ipAnterior, "No asignada");
+                }
+            }
+
+            IPsOcupadas.Remove(ip);
         }
 
         public void PrevenirIP(string ip)
@@ -116,7 +200,6 @@ namespace SimuladorRedes
             if (!IPsReservadas.Contains(ip))
             {
                 IPsReservadas.Add(ip);
-                // Si está ocupada, liberarla
                 if (IPsOcupadas.Contains(ip))
                 {
                     LiberarIP(ip);
@@ -126,7 +209,7 @@ namespace SimuladorRedes
 
         private void IniciarVerificacionInactividad()
         {
-            timerVerificacionInactividad = new Timer(2000); // Verificar cada 2 segundos
+            timerVerificacionInactividad = new Timer(2000);
             timerVerificacionInactividad.Elapsed += VerificarInactividad;
             timerVerificacionInactividad.Start();
         }
@@ -140,20 +223,15 @@ namespace SimuladorRedes
                 {
                     cliente.Activo = false;
                     cliente.DetenerMedicionTrafico();
+
+                    if (!cliente.TieneReserva && !string.IsNullOrEmpty(cliente.IP) && cliente.IP != "No asignada")
+                    {
+                        LiberarIP(cliente.IP, cliente);
+                    }
+
                     ClienteDesactivado?.Invoke(cliente);
                 }
             }
-        }
-
-        public void AgregarClienteEjemplo(int numero)
-        {
-            // Generar MAC única basada en el número y timestamp para evitar duplicados
-            string mac = $"00:1A:2B:3C:{DateTime.Now.Second:D2}:{numero:D2}";
-            string hostname = $"Cliente-{numero}";
-
-            var cliente = new ClienteDHCP(mac, hostname);
-            cliente.IP = AsignarIP(cliente);
-            Clientes.Add(cliente);
         }
 
         public void DetenerTodosLosTimers()
@@ -166,31 +244,14 @@ namespace SimuladorRedes
                 cliente.DetenerMedicionTrafico();
             }
         }
+
         public void CambiarRedBase(string nuevaRed)
         {
-            RedBase = nuevaRed;
-            IPsOcupadas.Clear();
-
-            // Reasignar IPs a todos los clientes basado en la nueva red
-            foreach (var cliente in Clientes)
-            {
-                if (cliente.TieneReserva && !string.IsNullOrEmpty(cliente.IP))
-                {
-                    // Mantener la reserva si la IP está en el nuevo rango
-                    if (cliente.IP.StartsWith(RedBase))
-                    {
-                        IPsOcupadas.Add(cliente.IP);
-                    }
-                    else
-                    {
-                        cliente.IP = AsignarIP(cliente);
-                    }
-                }
-                else
-                {
-                    cliente.IP = AsignarIP(cliente);
-                }
-            }
+            // Este método ahora está obsoleto porque cada cliente tiene su propia red
+        }
+        public void NotificarIPCambio(ClienteDHCP cliente, string ipAnterior, string ipNueva)
+        {
+            IPCambio?.Invoke(cliente, ipAnterior, ipNueva);
         }
     }
 }
