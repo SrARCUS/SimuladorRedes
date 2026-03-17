@@ -129,5 +129,6 @@ namespace SimuladorRedes
             }
             return "Desconocida";
         }
+        public override string ToString() => Hostname;
     }
 }

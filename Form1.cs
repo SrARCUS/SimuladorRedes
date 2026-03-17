@@ -20,7 +20,7 @@ namespace SimuladorRedes
         private ListBox listBoxClientes;
         private Panel panelInfoCliente;
         private DHCPManager dhcpManager;
-
+        private ToolStripMenuItem sshMenuItem;   // ◄ AGREGAR ►
         // Referencia estática para compartir con DNS
         public static DHCPManager DHCPManagerInstance { get; private set; }
 
@@ -131,16 +131,19 @@ namespace SimuladorRedes
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             ftpMenuItem = new ToolStripMenuItem("FTP");
-            ftpMenuItem.Click += (s, e) => MessageBox.Show("Funcionalidad FTP en desarrollo", "FTP",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ftpMenuItem.Click += (s, e) => MostrarPanelFTP();
 
-            menuStrip.Items.AddRange(new ToolStripItem[]
-            {
+            sshMenuItem = new ToolStripMenuItem("SSH");
+            sshMenuItem.Click += (s, e) => MostrarPanelSSH();
+
+            menuStrip.Items.AddRange(new ToolStripItem[]            // ◄ MODIFICAR ►
+             {
                 dhcpMenuItem,
                 dnsMenuItem,
+                sshMenuItem,
                 httpMenuItem,
                 ftpMenuItem
-            });
+             });
 
             this.MainMenuStrip = menuStrip;
             this.Controls.Add(menuStrip);
@@ -416,6 +419,16 @@ namespace SimuladorRedes
             formDNS.ShowDialog();
         }
 
+        private void MostrarPanelSSH()                              // ◄ AGREGAR ►
+        {
+            FormSSH formSSH = new FormSSH(dhcpManager);
+            formSSH.ShowDialog();
+        }
+        private void MostrarPanelFTP()
+        {
+            FormFTP formFTP = new FormFTP(dhcpManager);
+            formFTP.ShowDialog();
+        }
         private void ActualizarListBoxClientes()
         {
             listBoxClientes.DataSource = null;
