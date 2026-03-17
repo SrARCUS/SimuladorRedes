@@ -52,6 +52,12 @@ namespace SimuladorRedes
         private ListBox lstLog;
 
         // ─────────────────────────────────────────────────────────
+        // ── Editor de texto ───────────────────────────────────────────
+        private GroupBox groupEditor;
+        private TextBox txtContenido;
+        private Button btnGuardarTxt;
+        private Label lblArchivoEdit;
+        private string rutaArchivoEditando;
         public FormFTP(DHCPManager manager)
         {
             dhcpManager = manager;
@@ -323,7 +329,59 @@ namespace SimuladorRedes
                 ForeColor = Color.Gold
             };
             grpLog.Controls.Add(lstLog);
+            // ── 7. Editor de .txt ─────────────────────────────────────────
+            groupEditor = new GroupBox
+            {
+                Text = "📝  Editor de archivo .txt",
+                Location = new Point(12, 580),
+                Size = new Size(940, 130),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
 
+            lblArchivoEdit = new Label
+            {
+                Text = "Haz doble clic en un archivo .txt para editarlo",
+                Location = new Point(8, 22),
+                Size = new Size(920, 18),
+                Font = new Font("Segoe UI", 8, FontStyle.Italic),
+                ForeColor = Color.Gray
+            };
+
+            txtContenido = new TextBox
+            {
+                Location = new Point(8, 44),
+                Size = new Size(820, 76),
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Consolas", 9),
+                ReadOnly = true,
+                BackColor = Color.FromArgb(250, 250, 250)
+            };
+
+            btnGuardarTxt = new Button
+            {
+                Text = "💾\nGuardar",
+                Location = new Point(838, 44),
+                Size = new Size(94, 76),
+                BackColor = Color.FromArgb(0, 170, 90),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Enabled = false
+            };
+            btnGuardarTxt.FlatAppearance.BorderSize = 0;
+            btnGuardarTxt.Click += BtnGuardarTxt_Click;
+
+            groupEditor.Controls.AddRange(new Control[] { lblArchivoEdit, txtContenido, btnGuardarTxt });
+            this.Controls.Add(groupEditor);
+
+            // Agrandar el form para que quepa el editor
+            this.Size = new Size(1200, 780);
+            this.MinimumSize = new Size(1100, 760);
+
+            // Doble clic en árboles para abrir editor
+            treeLocal.NodeMouseDoubleClick += TreeLocal_DoubleClick;
+            treeRemoto.NodeMouseDoubleClick += TreeRemoto_DoubleClick;
             // ── Nota: ruta del disco ──────────────────────────────
             Label lblRuta = new Label
             {
@@ -838,5 +896,77 @@ namespace SimuladorRedes
                 Font = new Font("Segoe UI", 9),
                 Enabled = false          // solo lectura: refleja permisos del usuario
             };
+        // ═════════════════════════════════════════════════════════
+        //  Editor de .txt
+        // ═════════════════════════════════════════════════════════
+        private void TreeLocal_DoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            string ruta = e.Node.Tag as string;
+            if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return;
+
+            if (!ruta.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            { MsgAviso("Solo se pueden editar archivos .txt"); return; }
+
+            AbrirEnEditor(ruta, esRemoto: false);
+        }
+
+        private void TreeRemoto_DoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (ftpManager.ConexionActiva == null) return;
+
+            if (!ftpManager.ConexionActiva.Usuario.PuedeEditar())
+            { MsgAviso("No tienes permiso 'Editar' para modificar archivos del servidor."); return; }
+
+            string ruta = e.Node.Tag as string;
+            if (string.IsNullOrEmpty(ruta) || !File.Exists(ruta)) return;
+
+            if (!ruta.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            { MsgAviso("Solo se pueden editar archivos .txt"); return; }
+
+            AbrirEnEditor(ruta, esRemoto: true);
+        }
+
+        private void AbrirEnEditor(string ruta, bool esRemoto)
+        {
+            rutaArchivoEditando = ruta;
+
+            string origen = esRemoto
+                ? $"🖧 Servidor · {ftpManager.ConexionActiva?.Servidor.Hostname}"
+                : $"🖥 Local · {(cmbClienteLocal.SelectedItem as ClienteDHCP)?.Hostname}";
+
+            lblArchivoEdit.Text = $"{origen}  ›  {Path.GetFileName(ruta)}   |   " +
+                                       $"Modificado: {File.GetLastWriteTime(ruta):dd/MM/yyyy HH:mm}";
+            lblArchivoEdit.ForeColor = esRemoto ? Color.DarkRed : Color.DarkBlue;
+
+            txtContenido.Text = File.ReadAllText(ruta);
+            txtContenido.ReadOnly = false;
+            txtContenido.BackColor = Color.White;
+            btnGuardarTxt.Enabled = true;
+        }
+
+        private void BtnGuardarTxt_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(rutaArchivoEditando)) return;
+
+            try
+            {
+                File.WriteAllText(rutaArchivoEditando, txtContenido.Text);
+                RegistrarLog($"💾 Guardado: {Path.GetFileName(rutaArchivoEditando)}");
+
+                lblArchivoEdit.Text = lblArchivoEdit.Text.Replace(
+                    $"Modificado: {File.GetLastWriteTime(rutaArchivoEditando).AddSeconds(-1):dd/MM/yyyy HH:mm}",
+                    $"Modificado: {DateTime.Now:dd/MM/yyyy HH:mm}");
+
+                // Refrescar el árbol correspondiente
+                bool esRemoto = rutaArchivoEditando.Contains(
+                    ftpManager.ConexionActiva?.Servidor.Hostname ?? "\0");
+
+                if (esRemoto) CargarArbolRemoto(); else CargarArbolLocal();
+
+                MessageBox.Show("Archivo guardado correctamente.", "Guardado",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { MsgError(ex.Message); }
+        }
     }
 }
