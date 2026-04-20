@@ -127,8 +127,7 @@ namespace SimuladorRedes
             dnsMenuItem.Click += (s, e) => MostrarPanelDNS();
 
             httpMenuItem = new ToolStripMenuItem("HTTP");
-            httpMenuItem.Click += (s, e) => MessageBox.Show("Funcionalidad HTTP en desarrollo", "HTTP",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            httpMenuItem.Click += (s, e) => MostrarPanelHTTP();
 
             ftpMenuItem = new ToolStripMenuItem("FTP");
             ftpMenuItem.Click += (s, e) => MostrarPanelFTP();
@@ -148,7 +147,11 @@ namespace SimuladorRedes
             this.MainMenuStrip = menuStrip;
             this.Controls.Add(menuStrip);
         }
-
+        private void MostrarPanelHTTP()
+        {
+            FormHTTP formHTTP = new FormHTTP();
+            formHTTP.ShowDialog();
+        }
         private void InicializarControles()
         {
             this.Size = new Size(950, 650);

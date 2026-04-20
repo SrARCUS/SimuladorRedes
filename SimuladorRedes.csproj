@@ -79,6 +79,12 @@
     <Compile Include="FormGestionUsuariosFTP.Designer.cs">
       <DependentUpon>FormGestionUsuariosFTP.cs</DependentUpon>
     </Compile>
+    <Compile Include="FormHTTP.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormHTTP_Designer.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="FormLoginFTP.cs">
       <SubType>Form</SubType>
     </Compile>
